@@ -13,14 +13,34 @@
 
 typedef struct Connection {
 	i32 socket_fd;
+	i32 server_id;
 	pthread_mutex_t run_lock;
 	u8 running;
 } Connection;
 
-void *read_incoming(Connection *c) {
-	i32 msg_size = 100;
+char *split_on_first_whitespace(char *input, char *output2) {
 
-	u8 msg_buffer[msg_size + 1];
+	char *tmp = input;
+	u32 idx = 0;
+	while (*tmp != ' ' && tmp != NULL) {
+		tmp++;
+		idx++;
+	}
+	tmp++;
+
+	char *output1 = malloc(idx + 1);
+	strncpy(output1, input, idx);
+	output1[idx] = '\0';
+
+	strncpy(output2, tmp, strlen(tmp));
+	return output1;
+}
+
+void *read_incoming(Connection *c) {
+	u32 msg_size = 512;
+	u8 first_run = 1;
+
+	char msg_buffer[msg_size + 1];
 	while (1) {
 		memset(msg_buffer, 0, msg_size);
 
@@ -41,7 +61,26 @@ void *read_incoming(Connection *c) {
 			return NULL;
 		}
 
-		printf("[%d] recieved: %s\n", recv_err, msg_buffer);
+		if (first_run) {
+			char *out_str = malloc(strlen(msg_buffer));
+			memset(out_str, 0, strlen(msg_buffer));
+			char *id_num = split_on_first_whitespace(msg_buffer, out_str);
+			c->server_id = atoi(id_num);
+			printf("%s as [%d]\n", out_str, c->server_id);
+			free(id_num);
+			free(out_str);
+
+			first_run = 0;
+		} else {
+			char *out_str = malloc(strlen(msg_buffer));
+			memset(out_str, 0, strlen(msg_buffer));
+			char *id_num = split_on_first_whitespace(msg_buffer, out_str);
+			if (atoi(id_num) != c->server_id) {
+				printf("[%d] %s\n", atoi(id_num), out_str);
+			}
+			free(id_num);
+			free(out_str);
+		}
 
 		usleep(10);
 	}

@@ -51,10 +51,14 @@ void start_repeater(MessageQueue *q) {
 		// Send top message to all connections
 		pthread_mutex_lock(&q->list->list_lock);
 		ConNode *tmp_conn = q->list->head;
+		char *message_mod = malloc(strlen(q->head->message) + 10);
+		sprintf(message_mod, "%d %s", q->head->origin_fd, q->head->message);
+
 		while (tmp_conn != NULL) {
-			send(tmp_conn->socket_fd, q->head->message, strlen(q->head->message), 0);
+			send(tmp_conn->socket_fd, message_mod, strlen(message_mod), 0);
 			tmp_conn = tmp_conn->next;
 		}
+		free(message_mod);
 		pthread_mutex_unlock(&q->list->list_lock);
 
 		// Pop message from message queue and free
@@ -147,7 +151,6 @@ void close_connection(ConNode *n) {
 void *handle_client(ConNode *n) {
     printf("%d connected\n", n->socket_fd);
 
-
 	while (1) {
 		u32 msg_size = 1024;
 		char *msg_buffer = malloc(msg_size);
@@ -166,7 +169,7 @@ void *handle_client(ConNode *n) {
 			return NULL;
 		}
 
-		printf("%s\n", msg_buffer);
+		printf("[%d] %s\n", n->socket_fd, msg_buffer);
 		push_message(n->list->queue, n->socket_fd, msg_buffer);
 		usleep(10);
 	}
@@ -184,7 +187,7 @@ void start_connection(ConList *l, i32 socket_fd) {
 		tmp->list = l;
 		tmp->next = l->head;
 		char *new_conn = malloc(50);
-		sprintf(new_conn, "client id: %d", socket_fd);
+		sprintf(new_conn, "%d registered client", socket_fd);
 		send(socket_fd, new_conn, strlen(new_conn), 0);
 		free(new_conn);
 		pthread_create(&tmp->t, NULL, (void *)handle_client, tmp);
