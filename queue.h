@@ -52,9 +52,11 @@ void start_repeater(MessageQueue *q) {
 		pthread_mutex_lock(&q->list->list_lock);
 		ConNode *tmp_conn = q->list->head;
 		char *message_mod = malloc(strlen(q->head->message) + 10);
+		memset(message_mod, 0, strlen(q->head->message) + 10);
 		sprintf(message_mod, "%d %s", q->head->origin_fd, q->head->message);
 
 		while (tmp_conn != NULL) {
+			//printf("sending to %d\n", tmp_conn->socket_fd);
 			send(tmp_conn->socket_fd, message_mod, strlen(message_mod), 0);
 			tmp_conn = tmp_conn->next;
 		}
@@ -119,9 +121,27 @@ ConList *new_list(u32 max_size, MessageQueue *queue) {
 	return l;
 }
 
+void print_conn_list(ConList *l) {
+	puts("[PRINTING CONN LIST]");
+	ConNode *tmp = l->head;
+	while (tmp != NULL) {
+		printf("connection: %d\n", tmp->socket_fd);
+		tmp = tmp->next;
+	}
+	puts("[END OF CONN LIST]");
+}
+
 void close_connection(ConNode *n) {
 	printf("closing connection %d\n", n->socket_fd);
 	pthread_mutex_lock(&n->list->list_lock);
+
+	if (n->list->size > 0) {
+		n->list->size--;
+	} else {
+		puts("empty list!");
+		pthread_mutex_unlock(&n->list->list_lock);
+		return;
+	}
 
 	ConNode *cur = n->list->head;
 	ConNode *prior = NULL;
@@ -130,18 +150,31 @@ void close_connection(ConNode *n) {
 		cur = cur->next;
 	}
 
+	//print_conn_list(n->list);
+
 	if (cur != NULL && prior != NULL) {
-		puts("removing from middle");
+		//printf("not head of list? size: %d, value: %d\n", n->list->size, n->socket_fd);
+
+		close(n->socket_fd);
 		prior->next = cur->next;
+
+		free(n);
+	} else if (cur != NULL && prior == NULL) {
+		//printf("head of list? size: %d, value: %d\n", n->list->size, n->socket_fd);
+
+		close(n->socket_fd);
+		if (n->list->size > 0) {
+			n->list->head = n->list->head->next;
+		} else {
+			n->list->head = NULL;
+		}
+
+		free(n);
+	} else {
+		printf("error? size: %d, value: %d\n", n->list->size, n->socket_fd);
 	}
 
-	close(n->socket_fd);
-	if (n->list->size > 0) {
-		n->list->size--;
-	} else {
-		puts("empty list!");
-	}
-	free(n);
+	//print_conn_list(n->list);
 
 	pthread_mutex_unlock(&n->list->list_lock);
 	printf("connection closed %d\n", n->socket_fd);
