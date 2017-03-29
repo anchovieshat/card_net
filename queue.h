@@ -42,14 +42,13 @@ typedef struct MessageQueue {
 
 void start_repeater(MessageQueue *q) {
 	while (1) {
-		pthread_mutex_lock(&q->queue_lock);
+		get_lock(&q->queue_lock);
 		while (q->size == 0) {
-			pthread_mutex_unlock(&q->queue_lock);
-			pthread_cond_wait(&q->has_things, &q->queue_lock);
+			wait_for_lock(&q->has_things, &q->queue_lock);
 		}
 
 		// Send top message to all connections
-		pthread_mutex_lock(&q->list->list_lock);
+		get_lock(&q->list->list_lock);
 		ConNode *tmp_conn = q->list->head;
 		char *message_mod = malloc(strlen(q->head->message) + 10);
 		memset(message_mod, 0, strlen(q->head->message) + 10);
@@ -61,7 +60,7 @@ void start_repeater(MessageQueue *q) {
 			tmp_conn = tmp_conn->next;
 		}
 		free(message_mod);
-		pthread_mutex_unlock(&q->list->list_lock);
+		release_lock(&q->list->list_lock);
 
 		// Pop message from message queue and free
 		MessageNode *tmp_msg = q->head;
@@ -78,7 +77,7 @@ void start_repeater(MessageQueue *q) {
 			q->size--;
 		}
 
-		pthread_mutex_unlock(&q->queue_lock);
+		release_lock(&q->queue_lock);
 	}
 }
 
@@ -98,7 +97,7 @@ void push_message(MessageQueue *q, i32 origin_fd, char *message) {
 	tmp->origin_fd = origin_fd;
 	tmp->message = message;
 	tmp->next = NULL;
-	pthread_mutex_lock(&q->queue_lock);
+	get_lock(&q->queue_lock);
 	if (q->head == NULL && q->tail == NULL) {
 		q->head = tmp;
 		q->tail = tmp;
@@ -106,8 +105,8 @@ void push_message(MessageQueue *q, i32 origin_fd, char *message) {
     	q->tail->next = tmp;
 	}
 	q->size++;
-	pthread_mutex_unlock(&q->queue_lock);
-	pthread_cond_signal(&q->has_things);
+	signal_to_lock(&q->has_things);
+	release_lock(&q->queue_lock);
 }
 
 
@@ -133,51 +132,52 @@ void print_conn_list(ConList *l) {
 
 void close_connection(ConNode *n) {
 	printf("closing connection %d\n", n->socket_fd);
-	pthread_mutex_lock(&n->list->list_lock);
 
-	if (n->list->size > 0) {
-		n->list->size--;
+	get_lock(&n->list->list_lock);
+	ConList *tmp_l = n->list;
+
+	if (tmp_l->size > 0) {
+		tmp_l->size--;
 	} else {
 		puts("empty list!");
-		pthread_mutex_unlock(&n->list->list_lock);
+		release_lock(&tmp_l->list_lock);
 		return;
 	}
 
-	ConNode *cur = n->list->head;
+	ConNode *cur = tmp_l->head;
 	ConNode *prior = NULL;
 	while (cur != n && cur != NULL) {
 		prior = cur;
 		cur = cur->next;
 	}
 
-	//print_conn_list(n->list);
-
+	i32 tmp_fd = n->socket_fd;
 	if (cur != NULL && prior != NULL) {
-		//printf("not head of list? size: %d, value: %d\n", n->list->size, n->socket_fd);
+		//printf("not head of list? size: %d, value: %d\n", tmp_l->size, tmp_fd);
 
-		close(n->socket_fd);
+		close(tmp_fd);
 		prior->next = cur->next;
 
 		free(n);
 	} else if (cur != NULL && prior == NULL) {
-		//printf("head of list? size: %d, value: %d\n", n->list->size, n->socket_fd);
+		//printf("head of list? size: %d, value: %d\n", tmp_L->size, tmp_fd);
 
-		close(n->socket_fd);
-		if (n->list->size > 0) {
-			n->list->head = n->list->head->next;
+		close(tmp_fd);
+		if (tmp_l->size > 0) {
+			tmp_l->head = tmp_l->head->next;
 		} else {
-			n->list->head = NULL;
+			tmp_l->head = NULL;
 		}
 
 		free(n);
 	} else {
-		printf("error? size: %d, value: %d\n", n->list->size, n->socket_fd);
+		printf("error? size: %d, value: %d\n", tmp_l->size, tmp_fd);
 	}
 
 	//print_conn_list(n->list);
 
-	pthread_mutex_unlock(&n->list->list_lock);
-	printf("connection closed %d\n", n->socket_fd);
+	release_lock(&tmp_l->list_lock);
+	printf("connection closed %d\n", tmp_fd);
 	pthread_exit(NULL);
 }
 
@@ -213,7 +213,7 @@ void *handle_client(ConNode *n) {
 }
 
 void start_connection(ConList *l, i32 socket_fd) {
-	pthread_mutex_lock(&l->list_lock);
+	get_lock(&l->list_lock);
 	if (l->max_size > l->size) {
 		ConNode *tmp = malloc(sizeof(ConNode));
 		tmp->socket_fd = socket_fd;
@@ -233,23 +233,23 @@ void start_connection(ConList *l, i32 socket_fd) {
 		send(socket_fd, full, strlen(full), 0);
 		close(socket_fd);
 	}
-	pthread_mutex_unlock(&l->list_lock);
+	release_lock(&l->list_lock);
 }
 
 
 void cleanup_list(ConList *l) {
-	pthread_mutex_lock(&l->list_lock);
+	get_lock(&l->list_lock);
 	ConNode *tmp = l->head;
 	puts("cleaning up!");
 	while (tmp != NULL) {
-		pthread_mutex_unlock(&l->list_lock);
+		release_lock(&l->list_lock);
 		pthread_join(tmp->t, NULL);
 
-		pthread_mutex_lock(&l->list_lock);
+		get_lock(&l->list_lock);
 		close(tmp->socket_fd);
 		tmp = tmp->next;
 	}
-	pthread_mutex_unlock(&l->list_lock);
+	release_lock(&l->list_lock);
 }
 
 #endif
